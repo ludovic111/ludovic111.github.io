@@ -1,0 +1,53 @@
+# Copies Horizon's mod index from its new home to the address launchers released before the
+# move to horizon-rust read. See README.md.
+name: mirror
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - name: Fetch the index and its icons
+        run: |
+          set -euo pipefail
+          src=https://horizon-rust.github.io/horizon-mods/
+          mkdir -p site/horizon-mods
+          curl -fsSL --retry 3 "${src}index.json" -o new.json
+          jq -e '.projects' new.json > /dev/null
+          # The addresses old launchers accept: the old Pages site and the old release URLs
+          # (GitHub redirects the latter to horizon-rust).
+          sed -e 's#https://horizon-rust\.github\.io/horizon-mods/#https://ludovic111.github.io/horizon-mods/#g' \
+              -e 's#https://github\.com/horizon-rust/horizon-mods/releases/download/#https://github.com/ludovic111/horizon-mods/releases/download/#g' \
+              new.json > site/horizon-mods/index.json
+          jq -r '.. | strings | select(startswith("https://ludovic111.github.io/horizon-mods/"))' site/horizon-mods/index.json \
+            | sort -u | while read -r url; do
+              path=${url#https://ludovic111.github.io/horizon-mods/}
+              case "$path" in *..*|"") continue ;; esac
+              mkdir -p "site/horizon-mods/$(dirname "$path")"
+              curl -fsSL --retry 3 "${src}${path}" -o "site/horizon-mods/$path" || echo "missing: $path"
+            done
+          cat > site/horizon-mods/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8"><title>Horizon mods</title>
+          <meta http-equiv="refresh" content="0; url=https://horizon-rust.github.io/horizon-mods/">
+          <p>Moved to <a href="https://horizon-rust.github.io/horizon-mods/">horizon-rust.github.io/horizon-mods</a></p>
+          HTML
+          touch site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: pages
+        uses: actions/deploy-pages@v4
